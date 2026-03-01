@@ -1,174 +1,61 @@
-const XLSX = require('xlsx');
 const fs = require('fs');
 const path = require('path');
 
-// Function to parse time string (HH:MM or HH:MM:SS)
-function parseTime(timeStr) {
-  if (!timeStr) return null;
-  const parts = timeStr.toString().trim().split(':');
-  if (parts.length < 2) return null;
-  return {
-    hours: parseInt(parts[0]),
-    minutes: parseInt(parts[1]),
-    seconds: parts[2] ? parseInt(parts[2]) : 0
-  };
-}
-
-// Function to convert time to decimal hours
-function timeToDecimal(timeObj) {
-  if (!timeObj) return 0;
-  return timeObj.hours + (timeObj.minutes / 60) + (timeObj.seconds / 3600);
-}
-
-// Function to calculate hours between two times
-function calculateHours(checkIn, checkOut, checkInDate, checkOutDate) {
-  if (!checkIn || !checkOut) {
-    return { hours: 0, status: 'incomplete' };
-  }
-
-  const checkInTime = timeToDecimal(checkIn);
-  const checkOutTime = timeToDecimal(checkOut);
-
-  // If check-out date is next day (night shift)
-  if (checkOutDate > checkInDate) {
-    // 24 - checkInTime + checkOutTime
-    const hoursWorked = (24 - checkInTime) + checkOutTime;
-    return { hours: hoursWorked.toFixed(2), status: 'night-shift' };
-  }
-
-  // Same day shift
-  if (checkOutTime < checkInTime) {
-    return { hours: 0, status: 'invalid' };
-  }
-
-  const hoursWorked = checkOutTime - checkInTime;
-  return { hours: hoursWorked.toFixed(2), status: 'same-day' };
-}
-
-// Function to extract date number from column header
-function getDateNumber(header) {
-  const match = header.match(/\d+/);
-  return match ? parseInt(match[0]) : null;
-}
-
 // Function to process attendance data
-function processAttendanceData(inputFile, outputFile) {
-  try {
-    // Read Excel file
-    const workbook = XLSX.readFile(inputFile);
-    const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-    const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+function processAttendanceData(data) {
+    const attendanceMap = {};
 
-    if (data.length < 2) {
-      console.error('Error: Excel file must have headers and data');
-      return;
-    }
+    // Read input CSV file (assuming it's named 'attendance.csv')
+    data.forEach(record => {
+        const [ID, Name, Date, Time, Status] = record.split(',');
+        const key = `${Date}-${ID}`;
 
-    const headers = data[0];
-    const rows = data.slice(1);
-
-    // Group data by ID
-    const groupedByID = {};
-
-    rows.forEach(row => {
-      const id = row[0];
-      const name = row[1];
-
-      if (!id) return;
-
-      if (!groupedByID[id]) {
-        groupedByID[id] = {
-          id,
-          name,
-          dailyData: {}
-        };
-      }
-
-      // Process each day's check-in and check-out
-      for (let i = 2; i < headers.length; i += 2) {
-        const dateNum = getDateNumber(headers[i]);
-        if (!dateNum) continue;
-
-        const checkInStr = row[i];
-        const checkOutStr = row[i + 1];
-
-        if (!groupedByID[id].dailyData[dateNum]) {
-          groupedByID[id].dailyData[dateNum] = {};
+        if (!attendanceMap[key]) {
+            attendanceMap[key] = {
+                ID,
+                Name,
+                Date,
+                Status,
+                hours: 0
+            };
         }
 
-        groupedByID[id].dailyData[dateNum].checkIn = checkInStr;
-        groupedByID[id].dailyData[dateNum].checkOut = checkOutStr;
-      }
+        // Assuming that Status also includes time worked in the form of 'Hours: X'
+        const hoursWorked = parseFloat(Status.split(': ')[1]) || 0;
+        attendanceMap[key].hours += hoursWorked;
     });
 
-    // Calculate hours and create output
-    const outputData = [];
-    const outputHeaders = ['ID', 'Name'];
+    // Create output files
+    const consolidatedData = [];
+    const dailySummary = {};
 
-    // Generate day headers (1-31)
-    for (let day = 1; day <= 31; day++) {
-      outputHeaders.push(`Day ${day} (Hours)`, `Day ${day} (Status)`);
-    }
-    outputHeaders.push('Total Hours', 'Working Days', 'Average Hours/Day');
-
-    outputData.push(outputHeaders);
-
-    // Process each employee
-    Object.values(groupedByID).forEach(employee => {
-      const row = [employee.id, employee.name];
-      let totalHours = 0;
-      let workingDays = 0;
-
-      // Calculate hours for each day
-      for (let day = 1; day <= 31; day++) {
-        if (employee.dailyData[day]) {
-          const dayData = employee.dailyData[day];
-          const checkIn = parseTime(dayData.checkIn);
-          const checkOut = parseTime(dayData.checkOut);
-
-          const result = calculateHours(checkIn, checkOut, day, day);
-
-          row.push(result.hours, result.status);
-
-          if (result.status !== 'incomplete' && result.status !== 'invalid') {
-            totalHours += parseFloat(result.hours);
-            workingDays++;
-          }
-        } else {
-          row.push('-', 'absent');
+    // Consolidate data by day
+    Object.values(attendanceMap).forEach(entry => {
+        consolidatedData.push(`${entry.ID},${entry.Name},${entry.Date},${entry.hours}`);
+        
+        // Prepare daily summary
+        if (!dailySummary[entry.Date]) {
+            dailySummary[entry.Date] = { totalHours: 0 };
         }
-      }
-
-      // Add summary
-      const avgHours = workingDays > 0 ? (totalHours / workingDays).toFixed(2) : 0;
-      row.push(totalHours.toFixed(2), workingDays, avgHours);
-
-      outputData.push(row);
+        dailySummary[entry.Date].totalHours += entry.hours;
     });
 
-    // Write to Excel
-    const newWorkbook = XLSX.utils.book_new();
-    const newWorksheet = XLSX.utils.aoa_to_sheet(outputData);
-    XLSX.utils.book_append_sheet(newWorkbook, newWorksheet, 'Attendance Summary');
-    XLSX.writeFile(newWorkbook, outputFile);
+    // Write consolidated monthly data by day
+    fs.writeFileSync(path.join(__dirname, 'consolidated_monthly_data.csv'), consolidatedData.join('\n'));
 
-    console.log(`✓ Attendance data processed successfully!`);
-    console.log(`✓ Output saved to: ${outputFile}`);
-    console.log(`✓ Total employees processed: ${Object.keys(groupedByID).length}`);
-
-  } catch (error) {
-    console.error('Error processing file:', error.message);
-  }
+    // Write daily hours summary report
+    const dailyReport = Object.entries(dailySummary).map(([date, info]) => `${date},${info.totalHours}`).join('\n');
+    fs.writeFileSync(path.join(__dirname, 'daily_hours_summary.csv'), dailyReport);
 }
 
-// Main execution
-const inputFile = process.argv[2] || 'input.xlsx';
-const outputFile = process.argv[3] || 'attendance_output.xlsx';
+// Sample call to the function
+// You would normally get this data from your own source
+const sampleData = [
+    "1,Alice,2026-03-01,09:00,Hours: 8",
+    "1,Alice,2026-03-01,17:00,Hours: 8",
+    "2,Bob,2026-03-01,10:00,Hours: 7",
+    "1,Alice,2026-03-02,09:00,Hours: 7",
+    "2,Bob,2026-03-02,10:00,Hours: 6",
+];
 
-if (!fs.existsSync(inputFile)) {
-  console.error(`Error: Input file '${inputFile}' not found`);
-  console.log('Usage: node index.js <input.xlsx> [output.xlsx]');
-  process.exit(1);
-}
-
-processAttendanceData(inputFile, outputFile);
+processAttendanceData(sampleData);
