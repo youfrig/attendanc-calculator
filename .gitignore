@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Excel files (input/output)
+*.xlsx
+*.xls
+input.xlsx
+attendance_output.xlsx
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+
+# Logs
+logs/
+*.log
