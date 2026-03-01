@@ -1,14 +1,1 @@
-{"name": "attendance-calculator",
-  "version": "1.0.0",
-  "description": "A simple attendance calculator that processes Excel attendance data",
-  "main": "index.js",
-  "scripts": {
-    "start": "node index.js"
-  },
-  "keywords": ["attendance", "calculator", "excel"],
-  "author": "youfrig",
-  "license": "ISC",
-  "dependencies": {
-    "xlsx": "^0.18.5"
-  }
-}
+{"name": "attendance-calculator", "version": "1.0.0", "description": "A simple attendance calculator that processes Excel attendance data with punch-based format", "main": "index.js", "scripts": {"start": "node index.js"}, "keywords": ["attendance", "calculator", "excel", "punch-based"], "author": "youfrig", "license": "ISC", "dependencies": {"xlsx": "^0.18.5", "moment": "^2.29.4"}}
