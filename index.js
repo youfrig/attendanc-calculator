@@ -1,61 +1,87 @@
-const fs = require('fs');
-const path = require('path');
+const moment = require('moment');
 
-// Function to process attendance data
 function processAttendanceData(data) {
     const attendanceMap = {};
 
-    // Read input CSV file (assuming it's named 'attendance.csv')
-    data.forEach(record => {
-        const [ID, Name, Date, Time, Status] = record.split(',');
-        const key = `${Date}-${ID}`;
+    data.forEach(entry => {
+        const { ID, Name, Date, Time, Status } = entry;
+        const day = moment(Date).date();
+        const key = `${ID}-${Date}`;
 
         if (!attendanceMap[key]) {
             attendanceMap[key] = {
                 ID,
                 Name,
                 Date,
-                Status,
-                hours: 0
+                punches: [],
+                dailyHours: 0
             };
         }
 
-        // Assuming that Status also includes time worked in the form of 'Hours: X'
-        const hoursWorked = parseFloat(Status.split(': ')[1]) || 0;
-        attendanceMap[key].hours += hoursWorked;
-    });
+        // Add punch times and calculate daily hours
+        attendanceMap[key].punches.push({ Time, Status });
 
-    // Create output files
-    const consolidatedData = [];
-    const dailySummary = {};
-
-    // Consolidate data by day
-    Object.values(attendanceMap).forEach(entry => {
-        consolidatedData.push(`${entry.ID},${entry.Name},${entry.Date},${entry.hours}`);
-        
-        // Prepare daily summary
-        if (!dailySummary[entry.Date]) {
-            dailySummary[entry.Date] = { totalHours: 0 };
+        // Calculate hours based on Check in and Check out
+        if (Status === "Check out") {
+            const checkInTime = attendanceMap[key].punches.find(p => p.Status === "Check in" && !p.processed);
+            if (checkInTime) {
+                const checkOutMoment = moment(Date + ' ' + Time);
+                const checkInMoment = moment(Date + ' ' + checkInTime.Time);
+                const hoursWorked = checkOutMoment.diff(checkInMoment, 'hours', true);
+                attendanceMap[key].dailyHours += hoursWorked;
+                checkInTime.processed = true; // Avoid recalculating for the same check in
+            }
         }
-        dailySummary[entry.Date].totalHours += entry.hours;
     });
 
-    // Write consolidated monthly data by day
-    fs.writeFileSync(path.join(__dirname, 'consolidated_monthly_data.csv'), consolidatedData.join('\n'));
+    // Create final report structure
+    const finalReport = Object.values(attendanceMap).map(entry => {
+        const days = Array(31).fill(0);
+        days[moment(entry.Date).date() - 1] = entry.dailyHours; // store hours worked on that day
+        return {
+            ID: entry.ID,
+            Name: entry.Name,
+            Hours: days
+        };
+    });
 
-    // Write daily hours summary report
-    const dailyReport = Object.entries(dailySummary).map(([date, info]) => `${date},${info.totalHours}`).join('\n');
-    fs.writeFileSync(path.join(__dirname, 'daily_hours_summary.csv'), dailyReport);
+    return {
+        consolidatedData: finalReport,
+        summary: generateMonthlySummary(finalReport),
+    };
 }
 
-// Sample call to the function
-// You would normally get this data from your own source
-const sampleData = [
-    "1,Alice,2026-03-01,09:00,Hours: 8",
-    "1,Alice,2026-03-01,17:00,Hours: 8",
-    "2,Bob,2026-03-01,10:00,Hours: 7",
-    "1,Alice,2026-03-02,09:00,Hours: 7",
-    "2,Bob,2026-03-02,10:00,Hours: 6",
+function generateMonthlySummary(data) {
+    const summary = {};
+
+    data.forEach(entry => {
+        if (!summary[entry.ID]) {
+            summary[entry.ID] = {
+                ID: entry.ID,
+                totalHours: 0,
+                Name: entry.Name,
+                daysWorked: 0
+            };
+        }
+
+        const totalHoursForEntry = entry.Hours.reduce((a, b) => a + b, 0);
+        summary[entry.ID].totalHours += totalHoursForEntry;
+        if (totalHoursForEntry > 0) {
+            summary[entry.ID].daysWorked += 1; // Increase days worked
+        }
+    });
+
+    return Object.values(summary);
+}
+
+// Example usage with mock data
+const punchData = [
+    { ID: '001', Name: 'Jane Doe', Date: '2026-03-01', Time: '09:00', Status: 'Check in' },
+    { ID: '001', Name: 'Jane Doe', Date: '2026-03-01', Time: '17:00', Status: 'Check out' },
+    { ID: '002', Name: 'John Smith', Date: '2026-03-01', Time: '09:15', Status: 'Check in' },
+    { ID: '002', Name: 'John Smith', Date: '2026-03-01', Time: '18:00', Status: 'Check out' },
+    // Add more punch data as needed...
 ];
 
-processAttendanceData(sampleData);
+const report = processAttendanceData(punchData);
+console.log(report);
